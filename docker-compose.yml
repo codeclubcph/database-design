@@ -1,0 +1,67 @@
+# Database Design workshop environment.
+#   docker compose up -d        -> start PostgreSQL + MongoDB
+#   docker compose down -v      -> stop and wipe all data (fresh start)
+#
+# Optional web UIs:  docker compose --profile ui up -d
+#   Adminer (Postgres): http://localhost:8080
+#   mongo-express:      http://localhost:8081
+
+name: dbdesign
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: workshop
+      POSTGRES_PASSWORD: workshop
+      POSTGRES_DB: saas
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./:/workshop:ro          # so you can run: psql -f /workshop/...
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workshop -d saas"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mongo:
+    image: mongo:8
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+      - ./:/workshop:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  adminer:
+    image: adminer:latest
+    profiles: ["ui"]
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  mongo-express:
+    image: mongo-express:latest
+    profiles: ["ui"]
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:27017/
+      ME_CONFIG_BASICAUTH: "false"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  mongodata:
