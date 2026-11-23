@@ -1,67 +1,83 @@
-# Database Design - 4-hour workshop
+# Database Design workshop
 
-Design robust, scalable and maintainable database systems for modern applications: real-world schema design,
-performance, and how database decisions shape your APIs and architecture.
+Welcome! In four hours you will design the database of a real SaaS product, make slow queries fast, watch
+concurrency bugs happen on purpose, and decide when PostgreSQL is the right tool and when it is not.
 
-**Audience:** backend developers, fullstack engineers, DevOps engineers working with relational or hybrid systems.
-**Format:** 4 h including breaks - short theory blocks with live demos, two hands-on exercises
-(PostgreSQL, then MongoDB), both built around one running example: **Boardly**, a multi-tenant B2B SaaS.
+You will work on one running example, **Boardly**, a multi-tenant project-management SaaS with organizations,
+users, roles, subscriptions, invoices and projects. Everything runs on your own laptop in Docker.
 
-## Timetable (240 min)
+## Before the workshop (10 minutes)
 
-| Time | Min | Block | Type |
-|---|---|---|---|
-| 0:00 | 10 | Welcome, goals, setup check (`check-setup.sh`) | |
-| 0:10 | 18 | 1. Relational modeling fundamentals in real systems | talk + demo |
-| 0:28 | 18 | 2. Normalization vs denormalization trade-offs | talk + [demo 1](demos/01-normalization.sql) |
-| 0:46 | 5 | ☕ Break | |
-| 0:51 | 18 | 3. Designing schemas for APIs and business domains | talk |
-| 1:09 | 23 | 4. Indexing strategies and query optimization | talk + [demo 2](demos/02-indexing.sql) |
-| 1:32 | 18 | 5. Transactions, locking and consistency models | talk + [demo 3](demos/03-transactions.sql) |
-| 1:50 | 20 | 🍽 **Lunch / main break** | |
-| 2:10 | 15 | 6. Designing multi-tenant and SaaS-ready schemas | talk + [demo 4](demos/04-multitenancy-rls.sql) |
-| 2:25 | 35 | 🛠 **Exercise 1 - SaaS schema in PostgreSQL** (design, index lab, API alignment, debrief) | [hands-on](exercises/01-postgres/README.md) |
-| 3:00 | 5 | ☕ Break | |
-| 3:05 | 15 | 7. PostgreSQL vs NoSQL: when to use what | talk |
-| 3:20 | 25 | 🛠 **Exercise 2 - Flexible data in MongoDB** (feed, custom fields, comments, debrief) | [hands-on](exercises/02-mongo/README.md) |
-| 3:45 | 10 | 8. Common database design mistakes in production | game + [demo 5](demos/05-mistakes.sql) |
-| 3:55 | 5 | Wrap-up: checklist, further reading, feedback | |
-
-Minute-by-minute facilitator notes, talking points, demo scripts and timing fallbacks:
-**[docs/facilitator-guide.md](docs/facilitator-guide.md)**.
-
-## Prerequisites for participants
-
-Only **Docker** (with Compose) and a terminal - no local database installs.
-Full instructions to send ahead of time: **[PREREQUISITES.md](PREREQUISITES.md)**.
+You only need **Docker** (with Compose), Git and a terminal. No local database installs.
 
 ```bash
-docker compose pull && ./scripts/check-setup.sh
+git clone <repository-url> database-design && cd database-design
+docker compose pull          # about 1 GB: do this on a good connection, not at the venue
+./scripts/check-setup.sh     # starts PostgreSQL and MongoDB and checks they work
 ```
 
-## Repository layout
+When you see **"All good - you are ready for the workshop"**, you are done. Full instructions and troubleshooting
+are in [PREREQUISITES.md](PREREQUISITES.md). On the morning of the workshop, run `git pull` to get the latest files.
 
-```
-docker-compose.yml          PostgreSQL 17 + MongoDB 8 (+ optional Adminer / mongo-express with --profile ui)
-PREREQUISITES.md            send to participants 2 days before
-scripts/check-setup.sh      "is my laptop ready?" check
-docs/facilitator-guide.md   instructor handbook
-demos/                      5 runnable instructor demos (SQL)
-exercises/01-postgres/      README, starter.sql, lint.sql, lab-seed.sql, solution/
-exercises/02-mongo/         README, seed.js, helpers.js, solution/
-```
+## The day
 
-Everything under `/workshop` inside the containers is this repository (read-only), which is why
-`psql -f /workshop/...` works.
+| Time | What |
+|---|---|
+| 0:00 | Welcome and setup check |
+| 0:10 | Relational modeling, normalization vs denormalization |
+| 0:46 | Short break |
+| 0:51 | Schemas for APIs, indexing and query optimization, transactions and locking |
+| 1:50 | Lunch break (20 min) |
+| 2:10 | Multi-tenant and SaaS schemas |
+| 2:25 | **Exercise 1:** design Boardly in PostgreSQL |
+| 3:00 | Short break |
+| 3:05 | PostgreSQL vs NoSQL |
+| 3:20 | **Exercise 2:** the flexible parts of Boardly in MongoDB |
+| 3:45 | Common mistakes in production, wrap-up |
 
-## Running the reference solutions (instructor smoke test, ~1 min)
+## The exercises
+
+Work in pairs. Each exercise has its own guide with the task, a timebox and hints.
+
+| | Guide | You will |
+|---|---|---|
+| Exercise 1 | [exercises/01-postgres/README.md](exercises/01-postgres/README.md) | complete a schema (roles, billing, tenants), lint it, speed up three slow queries, align it with the API |
+| Exercise 2 | [exercises/02-mongo/README.md](exercises/02-mongo/README.md) | fix an activity feed, tenant-defined custom fields and comments in MongoDB |
+
+Each exercise folder has a `solution/` directory. **Please try first** and look only when you are stuck or the
+exercise is over; you learn much more that way.
+
+## Cheat sheet
 
 ```bash
-docker compose up -d --wait
-docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/solution/schema.sql
-docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/lint.sql
-docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/lab-seed.sql
-docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/solution/lab-indexes.sql
-docker compose exec -T mongo mongosh --quiet --file /workshop/exercises/02-mongo/seed.js
-docker compose exec -T mongo mongosh --quiet --file /workshop/exercises/02-mongo/solution/solution.js
+docker compose up -d                                   # start the databases (data is kept)
+docker compose exec postgres psql -U workshop -d saas  # PostgreSQL shell    (\dt  \d table  \q to quit)
+docker compose exec mongo mongosh boardly              # MongoDB shell       (exit to quit)
+docker compose down                                    # stop (keeps your data)
+docker compose down -v                                 # stop AND delete all data (fresh start)
 ```
+
+Run a SQL file from this repository:
+
+```bash
+docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/starter.sql
+```
+
+Inside the containers this repository is mounted read-only at `/workshop`, so any path in the repo works after that prefix.
+
+Prefer a graphical client? Start the optional web UIs with `docker compose --profile ui up -d`:
+Adminer at <http://localhost:8080> (system PostgreSQL, server `postgres`, user `workshop`, password `workshop`,
+database `saas`) and mongo-express at <http://localhost:8081>. External clients connect to `localhost:5432`
+(user and password `workshop`, database `saas`) and `mongodb://localhost:27017`.
+
+## What is in this repository
+
+```
+exercises/     the two hands-on exercises (starter files, data, guides, solutions)
+demos/         the instructor's demo scripts: feel free to re-run them later
+PREREQUISITES.md   setup instructions and troubleshooting
+docker-compose.yml PostgreSQL 17 and MongoDB 8
+```
+
+After the workshop the repository is yours: re-run the demos, redo the exercises, and reuse the linter
+(`exercises/01-postgres/lint.sql`) on your own schemas with `-v schema=your_schema_name`.

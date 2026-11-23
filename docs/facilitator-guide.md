@@ -11,7 +11,19 @@ Keep slides to a minimum - the demos in `demos/` *are* the content.
 
 - [ ] Send [PREREQUISITES.md](../PREREQUISITES.md) 2-3 days ahead; ask everyone to run `./scripts/check-setup.sh` and reply "ready" (or the output).
 - [ ] Venue wifi is **not** good enough for 1 GB of image pulls. Have a USB stick with `docker save postgres:17 mongo:8 | gzip` as fallback (`docker load` on the other side).
-- [ ] Run the smoke test from the root README on your own machine the morning of the workshop. Then `docker compose down -v` for a clean start.
+- [ ] Run the smoke test below on your own machine the morning of the workshop. Then `docker compose down -v` for a clean start.
+
+```bash
+docker compose up -d --wait
+docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/solution/schema.sql
+docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/lint.sql
+docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/lab-seed.sql
+docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/solution/lab-indexes.sql
+docker compose exec -T mongo mongosh --quiet --file /workshop/exercises/02-mongo/seed.js
+docker compose exec -T mongo mongosh --quiet --file /workshop/exercises/02-mongo/solution/solution.js
+```
+
+- [ ] Instructor material lives in `docs/` (this guide) and the slide deck; participants only need the root README and `PREREQUISITES.md`.
 - [ ] Prepare 8-10 slides max: agenda, 3 isolation models for multi-tenancy, isolation-level table, SQL-vs-NoSQL decision table, mistakes checklist. Content is below.
 - [ ] Font size 18+ in terminal and editor. Two terminals side by side ready for demo 3.
 - [ ] Group size 6-20 works. Pairs for the exercises; with more than 20, add a second helper.
