@@ -54,7 +54,8 @@ Draw the tables on paper first (boxes and arrows, 3 minutes), then write the DDL
 **Rules of thumb for the room:** `NOT NULL` by default - `CHECK` constraints for every enum - money is integer
 minor units - `timestamptz`, never `timestamp` - every foreign key gets an index - ask "who is the tenant of this row?".
 
-Check yourself with the linter. Every section should print `(0 rows)` (section 4 is informational):
+Check yourself with the linter. Sections 1, 2, 3 and 6 should normally print `(0 rows)`. Sections 4 and 5
+are informational: review tables without `org_id` and nullable foreign keys to ensure each is intentional.
 
 ```bash
 docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/lint.sql
@@ -201,8 +202,9 @@ docker compose exec -T postgres psql -U workshop -d saas \
   -f /workshop/exercises/01-postgres/lint.sql
 ```
 
-A good linter run shows `(0 rows)` for sections 1, 2, 3, 5, and 6. Section 4 is informational. Section 5's
-`subscription_id` finding is acceptable if that relationship is intentionally optional.
+A good linter run normally shows `(0 rows)` for sections 1, 2, 3, and 6. Sections 4 and 5 are informational:
+review each finding. For example, section 5's `subscription_id` finding is acceptable if that relationship is
+intentionally optional.
 
 ### Part A - force every constraint to fail
 
@@ -291,6 +293,9 @@ docker compose exec -T postgres psql -U workshop -d saas \
 | EXPLAIN uses `Sort` after creating an index | Index column order or sort direction differs from the query | Put equality columns first and the sort/range column in the requested order |
 | EXPLAIN says `Heap Fetches` | Table pages are needed by the visibility map or INCLUDE is incomplete | Run `VACUUM`, include only columns required by the query |
 | `port is already allocated` | Host port 5432 is used by another container or PostgreSQL | Stop the conflicting service or change host port `5433:5432` |
+
+> **Warning:** Running `solution/schema.sql` drops and recreates the `app` schema, replacing your database work.
+> Read it in your editor or save your work before running it.
 
 Reference solution (look only after you tried!): [`solution/schema.sql`](solution/schema.sql),
 [`solution/lab-indexes.sql`](solution/lab-indexes.sql), [`solution/api-mapping.md`](solution/api-mapping.md).

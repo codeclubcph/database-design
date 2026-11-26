@@ -1,7 +1,8 @@
 -- =====================================================================
 -- Schema linter: works on ANY schema you design in `app`.
 --   docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/lint.sql
--- Every section should return ZERO rows. Rows = something to fix (or to defend!).
+-- Sections 1, 2, 3 and 6 should normally return zero rows.
+-- Sections 4 and 5 are informational; review each finding for intentional design.
 -- =====================================================================
 \pset null '(null)'
 \if :{?schema}

@@ -11,7 +11,7 @@ users, roles, subscriptions, invoices and projects. Everything runs on your own 
 You only need **Docker** (with Compose), Git and a terminal. No local database installs.
 
 ```bash
-git clone <repository-url> database-design && cd database-design
+git clone https://github.com/codeclubcph/database-design.git database-design && cd database-design
 docker compose pull          # about 1 GB: do this on a good connection, not at the venue
 ./scripts/check-setup.sh     # starts PostgreSQL and MongoDB and checks they work
 ```

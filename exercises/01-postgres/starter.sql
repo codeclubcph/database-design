@@ -1,5 +1,5 @@
 -- =====================================================================
--- Exercise 1 - PART A: design the SaaS schema      (~20 min)
+-- Exercise 1 - PART A: design the SaaS schema      (~15 min)
 -- =====================================================================
 -- Fill in every  -- TODO.  Run it as many times as you like:
 --

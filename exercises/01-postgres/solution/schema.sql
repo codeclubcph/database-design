@@ -1,5 +1,6 @@
 -- =====================================================================
 -- Exercise 1 - REFERENCE SOLUTION (one good answer, not THE answer)
+-- WARNING: this drops and recreates the `app` schema, replacing your work.
 -- docker compose exec -T postgres psql -U workshop -d saas -f /workshop/exercises/01-postgres/solution/schema.sql
 -- =====================================================================
 

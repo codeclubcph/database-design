@@ -19,7 +19,7 @@ mongo-express in your browser instead (see below).
 ## Setup (3 commands)
 
 ```bash
-git clone <repository-url> database-design && cd database-design
+git clone https://github.com/codeclubcph/database-design.git database-design && cd database-design
 docker compose pull          # downloads ~1 GB once - do this on a good connection, NOT at the venue
 ./scripts/check-setup.sh     # starts the databases and verifies everything works
 ```
