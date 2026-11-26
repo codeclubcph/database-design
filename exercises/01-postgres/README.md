@@ -9,6 +9,9 @@ works on projects. You own the database and the REST API that sits on top of it.
 > Prerequisite: `docker compose up -d` is running (see the root [README](../../README.md)).
 > Open a shell: `docker compose exec postgres psql -U workshop -d saas`
 
+New to SQL table definitions? See the [PostgreSQL cheat sheet](sql-cheat-sheet.md) for keys, `REFERENCES`,
+constraints, and basic commands.
+
 ## Business rules
 
 1. A **user** has one global account (unique e-mail, case-insensitive) and can belong to **many organizations**.
