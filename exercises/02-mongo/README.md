@@ -96,5 +96,212 @@ most recent comments in the project (**subset pattern**) so the project list sta
 - What does Mongo give you here that PostgreSQL (with `jsonb`) would make harder? What would you lose by moving **billing** to Mongo?
 - Where does the **tenant boundary** live in this model? What guarantees that a query cannot forget `org_id`?
 
-Reference: [`solution/solution.js`](solution/solution.js)
-(`docker compose exec -T mongo mongosh --quiet --file /workshop/exercises/02-mongo/solution/solution.js`).
+## Detailed walkthrough and common errors
+
+### Start MongoDB and the seed
+
+Start the database and verify it:
+
+```bash
+docker compose up -d mongo
+docker compose exec mongo mongosh boardly --eval 'db.runCommand({ping:1})'
+```
+
+Load the deterministic seed from the repository mount:
+
+```bash
+docker compose exec -T mongo mongosh --quiet \
+  --file /workshop/exercises/02-mongo/seed.js
+```
+
+The seed drops the complete `boardly` database first. Do not run it against a real database or use it as a
+migration for user data. It should report `5000` projects and `200000` events. Re-running it is safe and restores
+the original shape.
+
+Open the interactive shell and load the plan helper:
+
+```bash
+docker compose exec mongo mongosh boardly
+load("/workshop/exercises/02-mongo/helpers.js")
+```
+
+A `COLLSCAN` means MongoDB read every document in the collection. A healthy limited feed should use `IXSCAN` and
+return approximately the same number of examined documents and returned documents.
+
+### B1 - activity feed procedure
+
+Measure both queries before adding indexes:
+
+```javascript
+plan(db.events.find({ org_id: 1 }).sort({ at: -1 }).limit(50));
+plan(db.events.find({ org_id: 1, type: "invoice.paid" }).sort({ at: -1 }).limit(50));
+```
+
+Create one index for the general feed and one for the type filter:
+
+```javascript
+db.events.createIndex({ org_id: 1, at: -1 });
+db.events.createIndex({ org_id: 1, type: 1, at: -1 });
+```
+
+The second index follows ESR: equality on `org_id`, equality on `type`, then sort on `at`. Record
+`nReturned`, `totalDocsExamined`, and `executionTimeMillis` after rebuilding or warming the queries.
+
+Do not expect one compound index to serve every arbitrary sort. An index on `{ at: -1, org_id: 1 }` cannot efficiently
+serve the equality-on-org filter because the sort field comes first.
+
+### B2 - custom fields migration procedure
+
+First prove the baseline problem:
+
+```javascript
+plan(db.projects.find({
+  org_id: 1,
+  archived: false,
+  "custom.sprint": { $gt: 30 }
+}));
+```
+
+Preview the migration on one document before applying it to all documents:
+
+```javascript
+db.projects.findOne({}, { custom: 1 });
+```
+
+Run the update pipeline:
+
+```javascript
+db.projects.updateMany({}, [
+  {
+    $set: {
+      custom_fields: {
+        $map: {
+          input: { $objectToArray: "$custom" },
+          as: "f",
+          in: { k: "$$f.k", v: "$$f.v" }
+        }
+      }
+    }
+  },
+  { $unset: "custom" }
+]);
+```
+
+Create one multikey index:
+
+```javascript
+db.projects.createIndex({
+  org_id: 1,
+  "custom_fields.k": 1,
+  "custom_fields.v": 1
+});
+```
+
+Verify the new shape:
+
+```javascript
+db.projects.findOne({}, { custom: 0 });
+```
+
+The query must use `$elemMatch` so the key and value come from the same array element:
+
+```javascript
+plan(db.projects.find({
+  org_id: 1,
+  archived: false,
+  custom_fields: {
+    $elemMatch: { k: "sprint", v: { $gt: 30 } }
+  }
+}));
+```
+
+Avoid a separate array element for key and value; `k: "sprint", v: 31` must describe the same object.
+
+### B3 - comments migration procedure
+
+Measure the largest document:
+
+```javascript
+db.projects.aggregate([
+  { $project: { s: { $bsonSize: "$$ROOT" } } },
+  { $sort: { s: -1 } },
+  { $limit: 1 }
+]).toArray();
+```
+
+Move only projects with at least one comment. The seed contains one project with 3000 comments, plus small arrays:
+
+```javascript
+db.projects.aggregate([
+  { $match: { "comments.0": { $exists: true } } },
+  { $unwind: "$comments" },
+  {
+    $project: {
+      _id: 0,
+      project_id: "$_id",
+      org_id: 1,
+      author_id: "$comments.author_id",
+      body: "$comments.body",
+      at: "$comments.at"
+    }
+  },
+  { $merge: { into: "comments" } }
+]);
+```
+
+Keep recent comments and the count on the project:
+
+```javascript
+db.projects.updateMany({}, [
+  {
+    $set: {
+      comment_count: { $size: "$comments" },
+      recent_comments: { $slice: ["$comments", -3] }
+    }
+  },
+  { $unset: "comments" }
+]);
+```
+
+Create newest-first indexes:
+
+```javascript
+db.comments.createIndex({ project_id: 1, at: -1 });
+db.projects.createIndex({ org_id: 1, archived: 1, created_at: -1 });
+```
+
+Verify:
+
+```javascript
+plan(db.comments.find({ project_id: 1 }).sort({ at: -1 }).limit(20));
+db.projects.findOne({ _id: 1 }, { comments: 1, recent_comments: 1, comment_count: 1 });
+```
+
+The old `comments` field should be absent, but `recent_comments` and `comment_count` should remain.
+
+### Common MongoDB error messages
+
+| Error or symptom | Likely cause | Fix |
+|---|---|---|
+| `MongoServerError: database boardly not found` or empty collections | Seed was not loaded, or a different `mongosh` database was opened | Run `seed.js`, then use `mongosh boardly` |
+| Seed reports fewer than 5000 projects | A previous file failed mid-write or another JavaScript process changed the database | Re-run `seed.js`; it intentionally drops `boardly` |
+| `COLLSCAN` | There is no matching index or the index shape does not match the equality/sort pattern | Add the ESR index and rerun `plan(...)` |
+| `SORT` stage still appears | Sort field, sort direction, or equality fields differ from the index | Inspect `db.events.getIndexes()` and match `{ org_id, at }` |
+| `$objectToArray requires an object` | A document has `custom: null` or a scalar value | Filter or normalize invalid `custom` values before migration |
+| `$size requires an array` | `comments` is missing or has already been removed | Match only documents with `comments.0`, or rerun seed and then migration |
+| `$merge: Cannot insert document` | The target collection requires unique fields or is not writable | Check collection validation and remove stale target data |
+| `plan is not defined` | The helper was not loaded in this shell | Run `load("/workshop/exercises/02-mongo/helpers.js")` |
+| `E11000 duplicate key` | A unique index conflicts with existing duplicate data | Clean or migrate duplicates before creating uniqueness |
+| `documentsExamined` equals 5000 or 200000 | Query was unindexed or too broad | Confirm tenant equality and matching ESR index |
+| One project is much larger than 16 MB | Embedded comment growth was not bounded | Move unbounded comments to a separate collection |
+| A sprint query still uses `custom.sprint` | Migration was applied only in memory or the old seed was restored | Query `custom_fields` and `$elemMatch` and verify `custom` is removed |
+| TTL deletes too many records | The seed's events are old, or retention requirements are unknown | Test TTL only on `events_ttl_demo`, never a compliance collection |
+
+Run the complete reference implementation only after completing the tasks yourself:
+
+```bash
+docker compose exec -T mongo mongosh --quiet \
+  --file /workshop/exercises/02-mongo/solution/solution.js
+```
+
+Reference: [`solution/solution.js`](solution/solution.js).

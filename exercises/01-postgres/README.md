@@ -133,5 +133,164 @@ How many round trips does `POST .../change-plan` need, and which statements must
 - Which constraint was hardest to express - and is it enforced by the database or only by hope (application code)?
 - What would you change at 100 M invoices? (partitioning by `issued_at`, archiving, read replicas)
 
+## Detailed walkthrough and common errors
+
+### Set up and reset safely
+
+1. Confirm Docker is running:
+
+   ```bash
+docker info
+   ```
+
+2. Start only the databases, or use the repository setup check:
+
+   ```bash
+docker compose up -d --wait
+./scripts/check-setup.sh
+   ```
+
+3. Open PostgreSQL:
+
+   ```bash
+docker compose exec postgres psql -U workshop -d saas
+   ```
+
+Useful shell commands inside `psql` are `\dt`, `\d table_name`, `\d+ table_name`, `\x`, `\timing`, and `\q`.
+The starter script is intentionally re-runnable: every run drops and recreates the `app` schema.
+
+### Part A - detailed build sequence
+
+1. **Model organizations and users first.** These tables are already provided. Copy their slug, email, and
+   tenant semantics rather than inventing another URL identifier.
+2. **Create roles and permissions.** Make a role per organization and add a unique `(org_id, name)` constraint.
+   Keep permissions global. The `role_permissions` join table should use a composite primary key.
+3. **Create memberships.** Use `PRIMARY KEY (org_id, user_id)` and the composite foreign key
+   `(role_id, org_id) REFERENCES roles (id, org_id)`. Do not use only `role_id`; that allows a role from another
+   tenant.
+4. **Create plans and subscriptions.** Plans are global. Subscriptions belong to an organization and reference a
+   plan. Keep historical subscriptions, but protect live subscriptions with a partial unique index:
+
+   ```sql
+CREATE UNIQUE INDEX subscriptions_one_live_per_org
+    ON subscriptions (org_id)
+    WHERE status IN ('trialing', 'active', 'past_due');
+   ```
+
+5. **Create invoices and invoice items.** Choose whether `total_cents` is stored or derived. Store it only if
+   every write changes both the header and items in the same transaction. For either choice, never use a floating
+   point column. Use `org_id, number` for uniqueness and API lookup.
+6. **Create projects.** Store soft deletion as `archived_at` rather than deleting the row. Create a partial unique
+   index on active names so archived projects can reuse a name:
+
+   ```sql
+CREATE UNIQUE INDEX projects_name_active_uq
+    ON projects (org_id, lower(name))
+    WHERE archived_at IS NULL;
+   ```
+
+7. **Create indexes only after the foreign keys.** The linter warns only about tables in `app`. Indexes use the
+   leftmost-column rule: for a lookup by organization and status, put `org_id` and `status` before `issued_at`.
+
+Run the starter and linter after each TODO:
+
+```bash
+docker compose exec -T postgres psql -U workshop -d saas \
+  -f /workshop/exercises/01-postgres/starter.sql
+docker compose exec -T postgres psql -U workshop -d saas \
+  -f /workshop/exercises/01-postgres/lint.sql
+```
+
+A good linter run shows `(0 rows)` for sections 1, 2, 3, 5, and 6. Section 4 is informational. Section 5's
+`subscription_id` finding is acceptable if that relationship is intentionally optional.
+
+### Part A - force every constraint to fail
+
+The following statements intentionally fail. Run them one at a time and confirm an `ERROR` rather than continuing
+past the failure. The role and subscription tests may require IDs from your own seed data.
+
+```sql
+SET search_path = app;
+
+-- 1. Cross-tenant role (must be rejected by a composite FK)
+INSERT INTO memberships (org_id, user_id, role_id, status)
+VALUES (1, 1, 999, 'active');
+
+-- 2. A second live subscription (must be rejected by the partial unique index)
+INSERT INTO subscriptions (org_id, plan_id, status,
+                           current_period_start, current_period_end)
+VALUES (1, 1, 'active', now(), now() + interval '1 month');
+
+-- 3. Negative invoice and unknown status (must be rejected by CHECK constraints)
+INSERT INTO invoices (org_id, number, status, currency, total_cents)
+VALUES (1, 'BAD-NEGATIVE', 'draft', 'EUR', -1);
+
+INSERT INTO invoices (org_id, number, status, currency, total_cents)
+VALUES (1, 'BAD-STATUS', 'refunded', 'EUR', 100);
+
+-- 4. Mixed-case duplicate email (must be rejected by lower(email))
+INSERT INTO users (email, full_name) VALUES ('Ann@x.com', 'Ann');
+INSERT INTO users (email, full_name) VALUES ('ann@x.com', 'Ann again');
+```
+
+The exact row IDs may differ; the constraint names and fact that PostgreSQL rejects the statements are what matter.
+
+### Part B - detailed query procedure
+
+Load the dataset before running EXPLAIN:
+
+```bash
+docker compose exec -T postgres psql -U workshop -d saas \
+  -f /workshop/exercises/01-postgres/lab-seed.sql
+```
+
+The seed normally takes 15--30 seconds and creates about 2 million rows in the `lab` schema.
+For every query:
+
+1. Start `psql` and set the search path:
+
+   ```sql
+SET search_path = lab;
+   ```
+
+2. Run `EXPLAIN (ANALYZE, BUFFERS)` before adding an index.
+3. Record the top-level plan, execution time, and shared buffer reads.
+4. Run exactly one `CREATE INDEX` statement.
+5. Run `ANALYZE` or `VACUUM ANALYZE` when testing an index-only scan.
+6. Re-run the identical query and compare the same measurements.
+
+For Q1, equality columns belong first in the index and the descending sort column should last. PostgreSQL should
+prefer a bounded index scan and stop after 20 rows. It should not perform a heap sort.
+
+For Q2, the tenant and public invoice number form a key. A unique `(org_id, number)` index both creates a fast
+lookup and prevents duplicate invoice numbers per tenant.
+
+For Q3, consider a partial paid-invoice index plus `INCLUDE (total_cents)`. It is useful only because the query
+filters `status = 'paid'`. Verify `Heap Fetches: 0` and the lack of table reads to confirm an index-only scan.
+Visibility-map state can initially prevent the scan from being index-only; `VACUUM` updates that state.
+
+Run the complete reference index set only after doing the comparison yourself:
+
+```bash
+docker compose exec -T postgres psql -U workshop -d saas \
+  -f /workshop/exercises/01-postgres/solution/lab-indexes.sql
+```
+
+### Common PostgreSQL error messages
+
+| Error or symptom | Likely cause | Fix |
+|---|---|---|
+| `schema "app" does not exist` | File was run outside `/workshop` or starter failed early | Re-run the starter and inspect the first preceding error |
+| `psql: could not connect` | Docker or PostgreSQL is stopped | Run `docker compose up -d postgres` and `docker compose ps` |
+| `relation "app.roles" does not exist` | TODO 1 was skipped or the script stopped at an earlier syntax error | Finish earlier TODOs before later foreign keys |
+| `foreign key ... is not present in table "roles"` | Role belongs to a different organization | Store `(role_id, org_id)` together and use the composite FK |
+| `duplicate key value violates unique constraint` | Re-running seed data or violating a unique rule | Inspect existing rows and choose a fresh test value |
+| `violates check constraint` | Value is negative or outside an enum | Match the declared `CHECK` condition |
+| `function lower(text) does not exist` | Wrong SQL dialect or missing PostgreSQL | You are probably not connected to the PostgreSQL container |
+| EXPLAIN still uses `Seq Scan` | Planner thinks the table is small, statistics are stale, or the index is not usable | Run `ANALYZE`, check column order, and compare selectivity |
+| EXPLAIN uses `Sort` after creating an index | Index column order or sort direction differs from the query | Put equality columns first and the sort/range column in the requested order |
+| EXPLAIN says `Heap Fetches` | Table pages are needed by the visibility map or INCLUDE is incomplete | Run `VACUUM`, include only columns required by the query |
+| `port is already allocated` | Host port 5432 is used by another container or PostgreSQL | Stop the conflicting service or change host port `5433:5432` |
+
 Reference solution (look only after you tried!): [`solution/schema.sql`](solution/schema.sql),
 [`solution/lab-indexes.sql`](solution/lab-indexes.sql), [`solution/api-mapping.md`](solution/api-mapping.md).
